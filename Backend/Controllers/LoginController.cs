@@ -12,7 +12,7 @@ namespace Backend.Controllers
     [ApiController]
     [Route("api/auth")]
     public class LoginController : ControllerBase
-    {
+    { 
         private readonly AppDbContext _context;
         private readonly IConfiguration _config;
 
@@ -25,33 +25,98 @@ namespace Backend.Controllers
         [HttpPost("login")]
         public IActionResult Login([FromBody] LoginDto dto)
         {
-            if (dto == null || string.IsNullOrEmpty(dto.email) || string.IsNullOrEmpty(dto.mot_de_passe))
-                return BadRequest("Email et mot de passe sont obligatoires.");
+            try
+            {
+                if (dto == null || string.IsNullOrEmpty(dto.email) || string.IsNullOrEmpty(dto.mot_de_passe))
+                    return BadRequest(new { message = "Email et mot de passe sont obligatoires." });
 
-            var dbUser = _context.utilisateur
-                .FirstOrDefault(x => x.email == dto.email);
+                var dbUser = _context.utilisateur.FirstOrDefault(x => x.email == dto.email);
 
-            if (dbUser == null)
-                return Unauthorized("Email ou mot de passe invalide");
+                if (dbUser == null || dto.mot_de_passe != dbUser.mot_de_passe)
+                    return Unauthorized(new { message = "Email ou mot de passe invalide" });
 
-            if (dto.mot_de_passe != dbUser.mot_de_passe)
-                return Unauthorized("Email ou mot de passe invalide");
+                var token = GenerateToken(dbUser);
 
-            var token = GenerateToken(dbUser);
-            return Ok(new { token, role= dbUser.role });
+                return Ok(new { token, role = dbUser.role });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { message = "Erreur interne: " + ex.Message });
+            }
         }
-        [HttpGet("user/{id}")]
-        public IActionResult GetUserById(long id)
+       
+
+
+        [HttpGet("user")]
+        public IActionResult GetUtilisateurs(int page = 1, int pageSize = 5)
         {
-            var user = _context.utilisateur
-                .Where(u => u.id == id)
-                .Select(u => new { u.id, u.nom, u.email })
-                .FirstOrDefault();
+            var query = _context.utilisateur
+                .Where(u => u.role == "utilisateur");
+
+            var totalCount = query.Count();
+
+            var users = query
+                .OrderBy(u => u.id)
+                .Skip((page - 1) * pageSize)
+                .Take(pageSize)
+                .Select(u => new
+                {
+                    u.id,
+                    u.nom,
+                    u.email
+                  
+                })
+                .ToList();
+
+            return Ok(new
+            {
+                totalCount,
+                data = users
+            });
+        }
+        [HttpDelete("utilisateur/{id}")]
+        public IActionResult DeleteUtilisateur(int id)
+        {
+            var user = _context.utilisateur.FirstOrDefault(u => u.id == id);
 
             if (user == null)
-                return NotFound("Utilisateur non trouvé");
+                return NotFound(new { message = "Utilisateur non trouvé" });
 
-            return Ok(user);
+            _context.utilisateur.Remove(user);
+            _context.SaveChanges();
+
+            return Ok(new { message = "Utilisateur supprimé avec succès" });
+        }
+
+        [HttpPut("utilisateur/{id}")]
+        public IActionResult UpdateUtilisateur(int id, [FromBody] UpdateUtilisateurDto user)
+        {
+            if (user == null || string.IsNullOrEmpty(user.email) || string.IsNullOrEmpty(user.nom))
+                return BadRequest(new { message = "Email et nom sont obligatoires" });
+
+            var query = _context.utilisateur.FirstOrDefault(u => u.id == id);
+
+            if (query == null)
+                return NotFound(new { message = "Utilisateur non trouvé" });
+
+            query.email = user.email;
+            query.nom = user.nom;
+
+            _context.SaveChanges();
+
+            return Ok(new { message = "Utilisateur mis à jour" });
+        }
+
+        [HttpPost("utilisateur")]
+        public IActionResult AddUtilisateur([FromBody] utilisateur user)
+        {
+            if (user == null || string.IsNullOrEmpty(user.nom) || string.IsNullOrEmpty(user.email))
+                return BadRequest(new { message = "Nom et email sont obligatoires." });
+
+            _context.utilisateur.Add(user);
+            _context.SaveChanges();
+
+            return Ok(user); // نرجعو المستخدم الجديد باش يظهر مباشرة في frontend
         }
         private string GenerateToken(utilisateur user)
         {
